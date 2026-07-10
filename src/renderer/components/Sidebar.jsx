@@ -3,15 +3,26 @@ import SidebarToggle from './SidebarToggle';
 import { FolderOpenIcon, FolderIcon, DeleteIcon } from './icons';
 import EditableLabel from './tree/EditableLabel';
 
+// The panel along the left edge of the app window that lists all your open
+// workspaces (folders), similar to the sidebar in VS Code or Finder/File
+// Explorer's favorites list. You can open new folders, rename workspaces,
+// switch between them, and delete them from here.
 export default function Sidebar({ workspaces, open = true, onToggle }) {
   const { ready, workspaces: items, selectedId, setSelectedId, createWorkspace, renameWorkspace, deleteWorkspace } = workspaces;
 
   return (
+    // The whole sidebar smoothly slides open/shut by animating its width
+    // between 0 (fully hidden) and 15rem/240px (w-60) — that's what creates
+    // the collapse/expand animation when you click the toggle button.
     <aside
       className={`flex h-full shrink-0 flex-col overflow-hidden bg-surface transition-[width] duration-200 ${
         open ? 'w-60' : 'w-0'
       }`}
     >
+      {/* Inner content is kept at a fixed width even while the outer
+          <aside> is animating narrower, so the contents don't visibly
+          squish/reflow during the collapse animation — they just get
+          clipped off by the shrinking outer container instead. */}
       <div className="flex h-full w-60 flex-col overflow-hidden">
         <div className="flex h-[34px] shrink-0 select-none items-center px-2 [-webkit-app-region:drag]">
           <SidebarToggle open onToggle={onToggle} />
@@ -36,6 +47,8 @@ export default function Sidebar({ workspaces, open = true, onToggle }) {
             {!ready && (
               <div className="px-2 py-1 text-[12.5px] text-ink-dim">Loading…</div>
             )}
+            {/* Show a friendly "nothing here yet" message with an "open a
+                folder" call-to-action if there are no workspaces at all. */}
             {ready && items.length === 0 && <EmptyState onOpen={() => createWorkspace()} />}
             {items.map((workspace) => (
               <WorkspaceRow
@@ -54,6 +67,9 @@ export default function Sidebar({ workspaces, open = true, onToggle }) {
   );
 }
 
+// One row in the workspace list. Shows a folder icon, the workspace's
+// (renamable) name, and — only on hover, or when it's the selected/active
+// workspace — a delete button.
 function WorkspaceRow({ workspace, active, onSelect, onRename, onDelete }) {
   return (
     <div
@@ -65,6 +81,9 @@ function WorkspaceRow({ workspace, active, onSelect, onRename, onDelete }) {
           : 'border-transparent text-ink-dim hover:border-edge hover:bg-hover/50 hover:text-white'
       }`}
     >
+      {/* A thin glowing vertical accent bar on the left edge of the row,
+          only visible when this workspace is the selected one — it's a
+          purely decorative "you are here" indicator. */}
       <span
         className={`absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-danger transition-opacity duration-150 ${
           active ? 'opacity-100 shadow-[0_0_6px_rgba(242,67,79,0.8)]' : 'opacity-0'
@@ -83,6 +102,9 @@ function WorkspaceRow({ workspace, active, onSelect, onRename, onDelete }) {
   );
 }
 
+// The "no workspaces yet" placeholder shown before the user has opened any
+// folders — a dashed box with an icon, short message, and a button that
+// opens the same folder picker as the "+" icon in the header.
 function EmptyState({ onOpen }) {
   return (
     <div className="flex flex-col items-center gap-2.5 rounded-md border border-dashed border-edge px-4 py-6 text-center">

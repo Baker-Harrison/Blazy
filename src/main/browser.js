@@ -98,25 +98,67 @@ function attachViewEvents(paneId, tab) {
   // Browser keyboard shortcuts while the page has focus. Chrome-level keys
   // are handled here; pane-level ones are forwarded to the renderer.
   wc.on('before-input-event', (e, input) => {
+    // We only care about a key being pressed down (not released), so ignore
+    // every other kind of key event.
     if (input.type !== 'keyDown') return;
     const key = input.key.toLowerCase();
+    // "ctrl" is true if either the Ctrl key (Windows/Linux) or the Cmd key
+    // (Mac, called "meta" here) is held down, so the same shortcuts work on
+    // both kinds of keyboards.
     const ctrl = input.control || input.meta;
-    if (!ctrl && key !== 'f5' && key !== 'f12') return;
 
+
+    // A little helper: tell the renderer (the visible part of the app) that
+    // a shortcut happened, and stop the key press from doing anything else
+    // (like typing a letter into a text box on the page).
     const forward = (action) => {
       e.preventDefault();
       send('browser:shortcut', paneId, action);
     };
 
-    if (ctrl && key === 't') return forward('new-tab');
-    if (ctrl && key === 'w') return forward('close-tab');
-    if (ctrl && key === 'l') return forward('focus-address');
-    if (ctrl && key === 'tab') return forward(input.shift ? 'prev-tab' : 'next-tab');
-    if ((ctrl && key === 'r') || key === 'f5') { e.preventDefault(); wc.reload(); return; }
-    if (key === 'f12') { e.preventDefault(); wc.toggleDevTools(); return; }
-    if (ctrl && (key === '=' || key === '+')) { e.preventDefault(); wc.setZoomLevel(wc.getZoomLevel() + 0.5); return; }
-    if (ctrl && key === '-') { e.preventDefault(); wc.setZoomLevel(wc.getZoomLevel() - 0.5); return; }
-    if (ctrl && key === '0') { e.preventDefault(); wc.setZoomLevel(0); return; }
+    // 1. Handle global hotkeys (no Ctrl modifier required). F12 opens
+    // developer tools, F5 refreshes the page — these work no matter what.
+    switch (key) {
+      case 'f12':
+        e.preventDefault();
+        wc.toggleDevTools();
+        return;
+      case 'f5':
+        e.preventDefault();
+        wc.reload();
+        return;
+    }
+
+    // 2. Handle Ctrl-modified hotkeys. If Ctrl/Cmd isn't held down, none of
+    // these apply, so there's nothing left to do.
+    if (ctrl) {
+      switch (key) {
+        case 't': return forward('new-tab');
+        case 'w': return forward('close-tab');
+        case 'l': return forward('focus-address');
+        case 'tab': return forward(input.shift ? 'prev-tab' : 'next-tab');
+        case 'r':
+          e.preventDefault();
+          wc.reload();
+          return;
+        case '=':
+        case '+':
+          // Zoom in. "=" and "+" share a key on most keyboards (one needs
+          // Shift, one doesn't), so we treat them the same.
+          e.preventDefault();
+          wc.setZoomLevel(wc.getZoomLevel() + 0.5);
+          return;
+        case '-':
+          e.preventDefault();
+          wc.setZoomLevel(wc.getZoomLevel() - 0.5);
+          return;
+        case '0':
+          // Reset the zoom level back to the default (normal) size.
+          e.preventDefault();
+          wc.setZoomLevel(0);
+          return;
+      }
+    }
   });
 
   wc.on('context-menu', (_e, params) => {

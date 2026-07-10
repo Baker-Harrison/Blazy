@@ -1,3 +1,14 @@
+// This file is just a collection of small icon components used inside the
+// Browser pane's toolbar — back/forward arrows, refresh, a plus sign for a
+// new tab, an "x" for close, a stop sign, a speaker (for "this tab is
+// playing audio"), a globe (generic website icon), and a padlock (secure
+// connection icon), similar to icons you'd see in Chrome or Edge's address
+// bar and tab strip. Each one is drawn using SVG (Scalable Vector Graphics
+// — a way of describing a picture with lines/shapes/paths instead of a
+// grid of pixels, so it stays crisp at any size).
+
+// A left-pointing chevron/arrow for "go back" — fades out (30% opacity)
+// when "disabled" is true, i.e. when there's no earlier page to go back to.
 export function BackIcon({ disabled }) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" className={disabled ? 'opacity-30' : ''}>
@@ -13,6 +24,8 @@ export function BackIcon({ disabled }) {
   );
 }
 
+// A right-pointing chevron/arrow for "go forward," same disabled behavior
+// as BackIcon above.
 export function ForwardIcon({ disabled }) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" className={disabled ? 'opacity-30' : ''}>
@@ -28,6 +41,7 @@ export function ForwardIcon({ disabled }) {
   );
 }
 
+// A circular arrow, the standard "reload this page" icon.
 export function RefreshIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14">
@@ -50,6 +64,7 @@ export function RefreshIcon() {
   );
 }
 
+// A simple "+" used for the "open a new tab" button.
 export function PlusIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12">
@@ -58,6 +73,7 @@ export function PlusIcon() {
   );
 }
 
+// An "x" used for closing a tab.
 export function CloseIcon() {
   return (
     <svg width="8" height="8" viewBox="0 0 8 8">
@@ -66,6 +82,9 @@ export function CloseIcon() {
   );
 }
 
+// A larger "x" used for the "stop loading this page" button, shown while a
+// page is actively loading (replacing the refresh button, the same way
+// browsers swap the refresh icon for a stop icon mid-load).
 export function StopIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14">
@@ -74,6 +93,9 @@ export function StopIcon() {
   );
 }
 
+// A small speaker/audio icon, shown on a browser tab to indicate it's
+// currently playing sound — like the little speaker icon Chrome shows on a
+// tab playing a YouTube video.
 export function AudioIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10">
@@ -83,6 +105,8 @@ export function AudioIcon() {
   );
 }
 
+// A simple globe icon used as a generic placeholder favicon for websites
+// that don't have their own icon loaded yet.
 export function GlobeIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12">
@@ -93,6 +117,8 @@ export function GlobeIcon() {
   );
 }
 
+// A padlock icon, used to indicate a page was loaded over a secure (https)
+// connection — the same lock icon shown in a browser's address bar.
 export function LockIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12">

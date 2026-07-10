@@ -14,7 +14,26 @@ import {
 // Chrome-only pane: the actual page is a native WebContentsView owned by the
 // main process. We render the vertical tab rail + toolbar and continuously
 // report where the page area sits so main can position the view over it.
+//
+// In plain terms: "chrome" here means the browser's own controls (the
+// toolbar, tab list, address bar) — not the Chrome browser by Google, but
+// the general term for a browser's surrounding UI, as opposed to the web
+// PAGE itself. This React component only draws that surrounding UI. The
+// actual webpage is a completely separate, real browser view living in the
+// background "main" process (see browser.js) — this component's job is to
+// draw a rectangle of empty space, and constantly tell the background
+// process "the page should appear exactly here, at this size," so the real
+// browser view can be positioned on top of it like a picture frame.
 
+// Turns whatever text the user typed into the address bar into an actual
+// URL to load — handling three cases, similar to how a real browser's
+// address bar works:
+//  1. It's already a full URL (starts with "https://" or similar, or a
+//     special "about:" page) — use it as-is.
+//  2. It looks like a website address without the "https://" part (has a
+//     dot in it, like "example.com", or is "localhost") — add "https://"
+//     in front of it.
+//  3. Otherwise, treat it as a search query and send it to Google search.
 function toURL(raw) {
   const text = raw.trim();
   if (!text) return null;
@@ -26,11 +45,17 @@ function toURL(raw) {
   return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
 }
 
+// Decides what to show in the address bar for a given URL — hides our own
+// internal "data:" URLs (used for the custom error page in browser.js),
+// since showing that long encoded text to the user would be confusing.
 function displayURL(url) {
   if (!url || url.startsWith('data:')) return '';
   return url;
 }
 
+// The small icon shown at the start of each tab in the vertical tab rail:
+// a spinning loading indicator while the page is loading, the website's
+// own favicon once it has one, or a generic globe icon as a fallback.
 function TabFavicon({ tab }) {
   return (
     <span className="flex h-4 w-4 shrink-0 items-center justify-center">
@@ -45,6 +70,11 @@ function TabFavicon({ tab }) {
   );
 }
 
+// One tab entry in this browser's vertical tab list (this app uses a
+// sidebar-style vertical tab rail for browser tabs, rather than a
+// horizontal strip along the top like most browsers). Shows the favicon,
+// title, an audio indicator if the tab is playing sound, and a close
+// button — or, when the rail is collapsed to save space, just the icon.
 function VerticalTab({ tab, active, expanded, onActivate, onClose }) {
   return (
     <div
@@ -60,6 +90,8 @@ function VerticalTab({ tab, active, expanded, onActivate, onClose }) {
         active ? 'bg-hover text-ink' : 'text-ink-dim hover:bg-hover/50 hover:text-ink'
       } ${expanded ? '' : 'justify-center px-0'}`}
     >
+      {/* A thin colored accent bar on the left edge, shown only for the
+          currently active tab — a "you are here" indicator. */}
       <span
         className={`absolute inset-y-2 left-0 w-[2px] rounded-full bg-danger transition-opacity duration-150 ${
           active ? 'opacity-100' : 'opacity-0'
@@ -91,6 +123,10 @@ function VerticalTab({ tab, active, expanded, onActivate, onClose }) {
   );
 }
 
+// The little icon on the button that expands/collapses the vertical tab
+// rail — draws a rectangle with a divider line, shading the left "rail"
+// portion of it darker when the rail is currently expanded, to visually
+// hint at what the button does.
 function RailToggleIcon({ expanded }) {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12">
@@ -103,20 +139,43 @@ function RailToggleIcon({ expanded }) {
 
 export default function BrowserPane({ tab, workspace }) {
   const paneId = String(tab.id);
+  // The live state of this browser pane's tabs, kept in sync with the
+  // background process (see browser.js's pushState function).
   const [state, setState] = useState({ tabs: [], activeTabId: null });
+  // What's currently typed into the address bar.
   const [input, setInput] = useState('');
+  // Whether the user is actively editing the address bar right now (as
+  // opposed to it just displaying the current page's URL).
   const [editing, setEditing] = useState(false);
+  // Whether the vertical tab rail is shown expanded (with titles/text) or
+  // collapsed to just icons, remembered per-tab so it's restored next time.
   const [railExpanded, setRailExpanded] = useState(tab.config?.railExpanded !== false);
+  // A reference to the empty "page area" div — its on-screen position and
+  // size is measured continuously and reported to the background process,
+  // so it knows exactly where to draw the real webpage.
   const contentRef = useRef(null);
   const inputRef = useRef(null);
+  // Used to "debounce" saving this pane's session — see the effect below
+  // that uses it, which waits for things to settle before saving.
   const persistTimer = useRef(null);
+  // Remembers the last reported page-area position/size, so we only send
+  // an update to the background process when something has actually
+  // changed (rather than every single animation frame regardless).
   const lastRect = useRef(null);
+  // A ref-mirrored copy of "state," used inside long-lived event listeners
+  // below that need to read the LATEST state without re-subscribing every
+  // time state changes.
   const stateRef = useRef(state);
   stateRef.current = state;
 
   const activeTab = state.tabs.find((t) => t.id === state.activeTabId) || null;
 
   // --- Pane lifecycle: create native tabs from saved config, subscribe to state.
+  // In plain terms: when this Browser pane first appears, tell the
+  // background process to set up its real tabs (restoring whatever URLs
+  // were saved from last time, if any), and start listening for state
+  // updates (tab list changes) and keyboard shortcuts forwarded from the
+  // actual web page (see browser.js's before-input-event handling).
   useEffect(() => {
     const saved = tab.config || {};
     window.browser.ensurePane(paneId, {
@@ -148,12 +207,21 @@ export default function BrowserPane({ tab, workspace }) {
     return () => {
       offState();
       offShortcut();
+      // Tell the background process this pane is no longer visible on
+      // screen, so it hides/detaches the native page view accordingly.
       window.browser.setViewport(paneId, null, false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneId]);
 
   // --- Viewport tracking: report the content area's rect whenever it changes.
+  // In plain terms: this runs a tiny loop, once per animation frame (about
+  // 60 times a second), that measures exactly where the empty "page area"
+  // rectangle currently sits on screen and how big it is, and tells the
+  // background process about it — but ONLY when something has actually
+  // changed, to avoid needlessly spamming messages every single frame.
+  // This is what keeps the real browser page correctly aligned as you
+  // resize the window, drag a split divider, or switch workspace tabs.
   useEffect(() => {
     let raf;
     lastRect.current = null;
@@ -169,6 +237,9 @@ export default function BrowserPane({ tab, workspace }) {
           el.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true });
         const rect = { x: r.x, y: r.y, width: r.width, height: r.height, visible };
         const prev = lastRect.current;
+        // Only send an update if visibility changed, or the position/size
+        // moved by more than half a pixel (a small threshold to ignore
+        // meaningless sub-pixel rounding noise).
         if (
           !prev ||
           prev.visible !== visible ||
@@ -192,11 +263,24 @@ export default function BrowserPane({ tab, workspace }) {
   }, [paneId]);
 
   // --- Reflect active tab in the address bar (unless the user is typing).
+  // In plain terms: whenever you switch to a different browser tab (or
+  // that tab navigates somewhere new), update the address bar to show its
+  // URL — but only if the user isn't in the middle of typing something
+  // into the address bar themselves, so we don't yank their half-typed
+  // text away.
   useEffect(() => {
     if (!editing) setInput(displayURL(activeTab?.url));
   }, [activeTab?.url, editing]);
 
   // --- Persist session (urls + active index) and surface page title, debounced.
+  // In plain terms: every time this browser pane's tabs change (a new tab
+  // opened, closed, navigated, etc.), save a snapshot of "which URLs are
+  // open and which one is active" to the database, so reopening this
+  // workspace later restores your browsing session. This waits 600
+  // milliseconds after the last change before actually saving
+  // ("debouncing") so that rapid changes (like typing quickly or loading a
+  // page that redirects several times) don't trigger a flood of separate
+  // saves — only the final settled state gets written.
   useEffect(() => {
     if (!state.tabs.length) return;
     clearTimeout(persistTimer.current);
@@ -212,7 +296,7 @@ export default function BrowserPane({ tab, workspace }) {
           activeIndex,
           favicon: activeTab?.favicon || null,
           railExpanded,
-          url: undefined,
+          url: undefined, // Clear out the old legacy single-url field, now superseded by "urls".
         },
       });
     }, 600);
@@ -220,6 +304,9 @@ export default function BrowserPane({ tab, workspace }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, railExpanded]);
 
+  // Handles submitting the address bar (pressing Enter): converts whatever
+  // was typed into an actual URL (or search) and navigates there, then
+  // hands keyboard focus back to the actual web page.
   const handleSubmit = useCallback(
     (e) => {
       e.preventDefault();
@@ -233,6 +320,10 @@ export default function BrowserPane({ tab, workspace }) {
     [input, paneId]
   );
 
+  // Handles a few browser-style keyboard shortcuts (Ctrl+T new tab, Ctrl+W
+  // close tab, Ctrl+L focus the address bar) while focus is somewhere in
+  // this pane's own UI (not inside the actual web page, which has its own
+  // separate shortcut handling in browser.js).
   const handleChromeKeys = useCallback(
     (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -286,6 +377,9 @@ export default function BrowserPane({ tab, workspace }) {
             className="flex h-7 w-7 items-center justify-center rounded text-ink transition-colors duration-100 hover:bg-hover"
             title={loading ? 'Stop' : 'Reload'}
           >
+            {/* Same button doubles as Reload/Stop, swapping its icon and
+                action depending on whether the page is currently loading —
+                the same convention used by every major web browser. */}
             {loading ? <StopIcon /> : <RefreshIcon />}
           </button>
         </div>
@@ -305,6 +399,10 @@ export default function BrowserPane({ tab, workspace }) {
             }}
             onBlur={() => setEditing(false)}
             onKeyDown={(e) => {
+              // Escape cancels editing and restores the current page's
+              // actual URL, then hands focus back to the page — the same
+              // behavior as pressing Escape in a real browser's address
+              // bar.
               if (e.key === 'Escape') {
                 setInput(displayURL(activeTab?.url));
                 inputRef.current?.blur();
@@ -368,6 +466,10 @@ export default function BrowserPane({ tab, workspace }) {
 
         {/* Page area — the native WebContentsView is positioned over this div. */}
         <div ref={contentRef} className="min-h-0 min-w-0 flex-1 bg-app">
+          {/* If the actual page's background process crashed (which can
+              happen with any web page in any browser), show a friendly
+              message with a button to reload it, instead of leaving a
+              blank/broken-looking area. */}
           {activeTab?.crashed && (
             <div className="flex h-full flex-col items-center justify-center gap-3">
               <div className="text-[15px] font-light text-ink">This tab crashed</div>

@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { CloseIcon, PlusIcon } from '../icons';
 import { PANE_TYPES, paneIcon, paneLabel } from '../../lib/paneTypes';
 
+// The row of tabs shown at the top of each pane — like the tab strip in a
+// web browser, but for the app's own tabs (browser/terminal/editor).
+// This file draws that strip, handles dragging tabs to reorder/move them,
+// double-click-to-rename, right-click context menus, and the "+" button
+// for adding a new tab.
+
+// Whenever a floating menu (the tab context menu, or the "add tab"
+// dropdown) is open, embedded browser panes need to be told to temporarily
+// hide themselves — native browser views always render on TOP of regular
+// web content, so without this, an open menu could get visually covered by
+// a browser tab's page. This tiny reference counter tracks how many menus
+// are currently open across the whole app, so overlays only get "turned
+// off" once every menu that requested it has actually closed.
 let overlayRefCount = 0;
 function setBrowserOverlay(open) {
   overlayRefCount += open ? 1 : -1;
@@ -12,8 +25,12 @@ function setBrowserOverlay(open) {
 export default function TabBar({ pane, tabs, workspace }) {
   const { activateTab, closeTab, createTab, reorderTabInPane, moveTabToPane } = workspace;
   const paneId = pane.id;
+  // The currently open right-click context menu, if any: which tab it's
+  // for and where on screen to draw it.
   const [menu, setMenu] = useState(null); // { tabId, x, y }
 
+  // Handles dropping a tab (dragged from ANOTHER pane) onto empty space in
+  // this tab bar — moves it into this pane, appended at the end.
   const handleDrop = (e) => {
     e.preventDefault();
     const tabId = e.dataTransfer.getData('application/blazy-tab');
@@ -31,6 +48,10 @@ export default function TabBar({ pane, tabs, workspace }) {
       <div
         className="scrollbar-none flex flex-1 items-center gap-px overflow-x-auto"
         onWheel={(e) => {
+          // Lets you scroll the tab strip horizontally using a normal
+          // vertical mouse wheel/trackpad scroll, the same convenience
+          // most browsers offer when you have more tabs than fit on
+          // screen.
           if (e.deltaY) e.currentTarget.scrollLeft += e.deltaY;
         }}
       >
@@ -69,6 +90,10 @@ export default function TabBar({ pane, tabs, workspace }) {
   );
 }
 
+// One draggable tab "chip" in the tab strip: shows an icon (or the site's
+// favicon for browser tabs), the tab's title (double-click to rename it),
+// and a small close button. Supports being dragged to reorder within the
+// same pane, or dragged into a different pane entirely.
 function DraggableTab({
   tab,
   index,
@@ -83,9 +108,16 @@ function DraggableTab({
 }) {
   const Icon = paneIcon(tab.type);
   const ref = useRef(null);
+  // Whether another tab is currently being dragged directly over this one
+  // (used to draw a small highlight outline as a drop-target indicator).
   const [dragOver, setDragOver] = useState(false);
+  // Whether this tab's label is currently being edited inline.
   const [renaming, setRenaming] = useState(false);
 
+  // When a drag starts on this tab, attach the info other drop targets
+  // will need: which tab it is, which pane it came from, and its current
+  // position — using the browser's built-in drag-and-drop data transfer
+  // mechanism (the same one used for dragging files, links, etc.).
   const handleDragStart = (e) => {
     e.dataTransfer.setData('application/blazy-tab', String(tab.id));
     e.dataTransfer.setData('application/blazy-source-pane', paneId);
@@ -93,6 +125,10 @@ function DraggableTab({
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  // Handles another tab being dropped directly onto this one — either
+  // reordering it within the same pane, or moving it in from a different
+  // pane, landing just before or after this tab depending on which half of
+  // it the drop happened on.
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -101,6 +137,9 @@ function DraggableTab({
     const sourcePaneId = e.dataTransfer.getData('application/blazy-source-pane');
     if (!tabId) return;
 
+    // Dropping on the left half of this tab inserts before it; dropping on
+    // the right half inserts after it — the standard "which side did you
+    // drop on" convention for reordering draggable lists.
     let insertIndex = index;
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect();
@@ -109,6 +148,10 @@ function DraggableTab({
 
     if (sourcePaneId === paneId) {
       const sourceIndex = Number(e.dataTransfer.getData('application/blazy-source-index'));
+      // If the tab is moving rightward past its own original position, the
+      // removal of the tab from its old spot shifts every index after it
+      // down by one — this adjustment accounts for that so it lands
+      // exactly where visually expected.
       onReorder(tabId, sourceIndex < insertIndex ? insertIndex - 1 : insertIndex);
     } else {
       onMoveFromOtherPane(tabId, insertIndex);
@@ -132,6 +175,8 @@ function DraggableTab({
         setRenaming(true);
       }}
       onAuxClick={(e) => {
+        // Middle-click (mouse button 1) closes the tab, the same shortcut
+        // most browsers support for quickly closing tabs.
         if (e.button === 1) {
           e.preventDefault();
           onClose();
@@ -143,6 +188,9 @@ function DraggableTab({
         active ? 'bg-surface text-ink' : 'text-ink-dim hover:bg-hover hover:text-ink'
       } ${dragOver ? 'outline outline-1 outline-ink-dim/50' : ''}`}
     >
+      {/* Browser tabs show the actual website's favicon if one has loaded;
+          every other tab type (and browser tabs without a favicon yet)
+          shows its generic type icon instead. */}
       {tab.type === 'browser' && tab.config?.favicon ? (
         <img
           src={tab.config.favicon}
@@ -182,6 +230,9 @@ function DraggableTab({
   );
 }
 
+// The small inline text box shown while renaming a tab, following the same
+// commit-on-Enter/blur, cancel-on-Escape pattern used elsewhere in the app
+// (see EditableLabel.jsx for the sidebar's equivalent).
 function TabRenameInput({ value, onCommit, onCancel }) {
   const [draft, setDraft] = useState(value);
   const cancelled = useRef(false);
@@ -212,16 +263,25 @@ function TabRenameInput({ value, onCommit, onCancel }) {
   );
 }
 
+// The right-click menu for a tab, offering Duplicate, Split right/down
+// (create a new split section with a copy or move of this tab), and
+// various close actions.
 function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ x: menu.x, y: menu.y });
 
+  // While this menu is open, tell any browser panes to hide themselves so
+  // the menu isn't visually covered (see setBrowserOverlay above).
   useEffect(() => {
     setBrowserOverlay(true);
     return () => setBrowserOverlay(false);
   }, []);
 
   // Keep the menu on-screen.
+  // In plain terms: if the menu was about to open partly off the edge of
+  // the window (e.g. you right-clicked a tab near the right edge), nudge
+  // its position back so the whole menu stays visible instead of getting
+  // cut off.
   useEffect(() => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
@@ -231,6 +291,7 @@ function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
     });
   }, [menu]);
 
+  // Pressing Escape closes the menu, matching standard menu behavior.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -239,6 +300,8 @@ function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Wraps a menu action so that clicking any item both closes the menu AND
+  // runs the action, instead of having to remember to do both every time.
   const run = (fn) => () => {
     onClose();
     fn();
@@ -249,6 +312,9 @@ function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
     {
       label: 'Split right',
       action: run(() => workspace.splitPane(paneId, 'horizontal', menu.tabId)),
+      // "Split" only makes sense if there's more than one tab in the pane
+      // — splitting a pane that only has one tab wouldn't leave anything
+      // behind in the original half.
       disabled: tabCount < 2,
     },
     {
@@ -268,6 +334,9 @@ function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
 
   return (
     <>
+      {/* An invisible full-screen overlay that closes the menu when you
+          click (or right-click) anywhere outside of it — the standard way
+          context menus dismiss themselves. */}
       <div className="fixed inset-0 z-30" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
       <div
         ref={ref}
@@ -294,9 +363,13 @@ function TabContextMenu({ menu, paneId, tabCount, workspace, onClose }) {
   );
 }
 
+// The "+" button on the tab strip, which opens a small dropdown letting you
+// pick which type of tab (Browser/Terminal/Editor) to add.
 function TabAddButton({ onSelect }) {
   const [open, setOpen] = useState(false);
 
+  // While the dropdown is open, hide browser panes so they don't render
+  // over it (same overlay mechanism used by the context menu above).
   useEffect(() => {
     if (open) setBrowserOverlay(true);
     return () => {

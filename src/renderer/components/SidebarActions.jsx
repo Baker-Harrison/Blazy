@@ -1,5 +1,18 @@
 import { GearIcon, PlusIcon, SearchIcon } from './icons';
 
+// One reusable row-shaped button used for the actions at the top of the
+// sidebar ("New Agent", "Search", "Customize"). Rather than writing the
+// same button markup three separate times, we define it once here and
+// reuse it with different icons/labels/behavior below.
+//
+// Props:
+// - primary: makes the text brighter/more prominent (used for "New Agent").
+// - active: highlights the button as "currently toggled on" (used for
+//   Search when the search box is open).
+// - disabled: greys out the button and makes it unclickable.
+// - onClick: what happens when clicked.
+// - icon: the small icon to show on the left.
+// - children: the button's text label.
 function SidebarActionButton({ primary = false, active = false, disabled = false, onClick, icon, children }) {
   return (
     <button
@@ -16,8 +29,12 @@ function SidebarActionButton({ primary = false, active = false, disabled = false
   );
 }
 
+// The small strip of quick-action buttons at the top of the sidebar.
 export default function SidebarActions({ workspaces, searchOpen, onToggleSearch }) {
   const { ready, tree } = workspaces;
+  // "ready" means the workspace data has finished loading from disk.
+  // We only enable buttons that operate on workspaces (like New Agent or
+  // Search) once there's actually at least one workspace to act on.
   const hasWorkspaces = ready && tree.length > 0;
 
   return (
@@ -40,6 +57,9 @@ export default function SidebarActions({ workspaces, searchOpen, onToggleSearch 
         Search
       </SidebarActionButton>
 
+      {/* "Customize" doesn't do anything yet (no onClick), it's just
+          reserved for a future settings/customization feature. It's only
+          enabled once the app has finished loading ("ready"). */}
       <SidebarActionButton disabled={!ready} icon={<GearIcon />}>
         Customize
       </SidebarActionButton>
