@@ -1,0 +1,488 @@
+<title>Blazy — Design Spec</title>
+<style>
+  :root {
+    --page-bg: #f4f4f5;
+    --page-surface: #ffffff;
+    --page-border: #e2e2e5;
+    --page-text: #18181b;
+    --page-text-dim: #6b6b70;
+    --page-mono-bg: #ececee;
+    --accent: #f2434f;
+
+    --swatch-app: #16171b;
+    --swatch-titlebar: #1b1d22;
+    --swatch-hover: #2a2d35;
+    --swatch-danger: #f2434f;
+    --swatch-border: #2c2f37;
+    --swatch-text-primary: #e8eaf0;
+    --swatch-text-secondary: #9aa1ad;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #0f0f10;
+      --page-surface: #18181a;
+      --page-border: #2a2a2d;
+      --page-text: #ececee;
+      --page-text-dim: #97979d;
+      --page-mono-bg: #1f1f22;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --page-bg: #0f0f10;
+    --page-surface: #18181a;
+    --page-border: #2a2a2d;
+    --page-text: #ececee;
+    --page-text-dim: #97979d;
+    --page-mono-bg: #1f1f22;
+  }
+
+  :root[data-theme="light"] {
+    --page-bg: #f4f4f5;
+    --page-surface: #ffffff;
+    --page-border: #e2e2e5;
+    --page-text: #18181b;
+    --page-text-dim: #6b6b70;
+    --page-mono-bg: #ececee;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--page-text);
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 64px 24px 96px;
+  }
+
+  header.intro {
+    margin-bottom: 56px;
+  }
+
+  .eyebrow {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--page-text-dim);
+    margin: 0 0 12px;
+  }
+
+  h1 {
+    font-size: 34px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-size: 16px;
+    color: var(--page-text-dim);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  section {
+    margin-bottom: 56px;
+  }
+
+  h2 {
+    font-size: 13px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--page-text-dim);
+    margin: 0 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--page-border);
+  }
+
+  /* ---- Color ---- */
+
+  .color-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 20px;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--page-border);
+  }
+
+  .color-row:last-child { border-bottom: none; }
+
+  .swatch {
+    width: 96px;
+    height: 56px;
+    border-radius: 6px;
+    border: 1px solid var(--page-border);
+    flex-shrink: 0;
+  }
+
+  .color-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .color-name {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .color-usage {
+    font-size: 13px;
+    color: var(--page-text-dim);
+    margin-top: 2px;
+  }
+
+  .color-hex {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--page-text-dim);
+    background: var(--page-mono-bg);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* ---- Type ---- */
+
+  .type-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 20px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--page-border);
+    align-items: baseline;
+  }
+
+  .type-row:last-child { border-bottom: none; }
+
+  .type-label {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    color: var(--page-text-dim);
+  }
+
+  .type-sample-frame {
+    background: var(--swatch-app);
+    border-radius: 6px;
+    padding: 18px 20px;
+  }
+
+  .sample-titlebar-label {
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    color: var(--swatch-text-secondary);
+  }
+
+  .sample-heading {
+    font-weight: 300;
+    font-size: 26px;
+    color: var(--swatch-text-primary);
+    margin: 0;
+  }
+
+  .type-spec {
+    font-size: 12px;
+    color: var(--page-text-dim);
+    margin-top: 8px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+
+  /* ---- Titlebar component ---- */
+
+  .component-frame {
+    border: 1px solid var(--page-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .demo-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 34px;
+    background: var(--swatch-app);
+    user-select: none;
+  }
+
+  .demo-titlebar-controls {
+    display: flex;
+    height: 100%;
+  }
+
+  .demo-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+    background: transparent;
+    border: none;
+    color: var(--swatch-text-secondary);
+    cursor: pointer;
+    transition: background-color 0.1s ease, color 0.1s ease;
+  }
+
+  .demo-btn:hover { background: var(--swatch-hover); color: #fff; }
+  .demo-btn-close:hover { background: var(--swatch-danger); color: #fff; }
+
+  .demo-content {
+    background: var(--swatch-app);
+    padding: 28px;
+    text-align: center;
+  }
+
+  .demo-content h3 {
+    font-weight: 300;
+    color: var(--swatch-text-primary);
+    margin: 0;
+    font-size: 22px;
+  }
+
+  .component-caption {
+    font-size: 12.5px;
+    color: var(--page-text-dim);
+    margin-top: 10px;
+  }
+
+  .component-caption kbd {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    background: var(--page-mono-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11.5px;
+  }
+
+  /* ---- Sidebar component ---- */
+
+  .demo-app {
+    display: flex;
+    height: 200px;
+  }
+
+  .demo-sidebar {
+    width: 140px;
+    flex-shrink: 0;
+    background: var(--swatch-app);
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+  }
+
+  .demo-sidebar-title {
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    color: var(--swatch-text-secondary);
+  }
+
+  .demo-app-main {
+    flex: 1;
+    background: var(--swatch-app);
+  }
+
+  /* ---- Metrics ---- */
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .metric {
+    border: 1px solid var(--page-border);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+
+  .metric-value {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-label {
+    font-size: 12px;
+    color: var(--page-text-dim);
+    margin-top: 4px;
+  }
+
+  @media (max-width: 560px) {
+    .color-row, .type-row { grid-template-columns: 1fr; }
+    .swatch { width: 100%; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <p class="eyebrow">Blazy · Design Reference</p>
+    <h1>A dark, flat interface for a terminal app</h1>
+    <p class="lede">
+      Every color, type rule, and component below is taken directly from
+      the design tokens in <code>src/renderer/index.css</code>. No shadows, no gradients, no borders —
+      the titlebar is flush with the app background, distinguished only by
+      the button group.
+    </p>
+  </header>
+
+  <section>
+    <h2>Color</h2>
+    <div class="color-row">
+      <div class="swatch" style="background: var(--swatch-app);"></div>
+      <div class="color-meta">
+        <div>
+          <div class="color-name">App background</div>
+          <div class="color-usage">Main content area</div>
+        </div>
+        <div class="color-hex">#16171b</div>
+      </div>
+    </div>
+    <div class="color-row">
+      <div class="swatch" style="background: var(--swatch-hover);"></div>
+      <div class="color-meta">
+        <div>
+          <div class="color-name">Hover surface</div>
+          <div class="color-usage">Minimize / maximize button hover</div>
+        </div>
+        <div class="color-hex">#2a2d35</div>
+      </div>
+    </div>
+    <div class="color-row">
+      <div class="swatch" style="background: var(--swatch-danger);"></div>
+      <div class="color-meta">
+        <div>
+          <div class="color-name">Accent / danger</div>
+          <div class="color-usage">Close button hover, selected-workspace glow</div>
+        </div>
+        <div class="color-hex">#f2434f</div>
+      </div>
+    </div>
+    <div class="color-row">
+      <div class="swatch" style="background: var(--swatch-text-primary);"></div>
+      <div class="color-meta">
+        <div>
+          <div class="color-name">Text — primary</div>
+          <div class="color-usage">Headings, body copy</div>
+        </div>
+        <div class="color-hex">#e8eaf0</div>
+      </div>
+    </div>
+    <div class="color-row">
+      <div class="swatch" style="background: var(--swatch-text-secondary);"></div>
+      <div class="color-meta">
+        <div>
+          <div class="color-name">Text — secondary</div>
+          <div class="color-usage">Idle titlebar icon color</div>
+        </div>
+        <div class="color-hex">#9aa1ad</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Type</h2>
+    <div class="type-row">
+      <div class="type-label">Content heading</div>
+      <div>
+        <div class="type-sample-frame">
+          <p class="sample-heading">Blazy</p>
+        </div>
+        <div class="type-spec">26px · weight 300 · #e8eaf0</div>
+      </div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Font stack — UI</div>
+      <div class="type-spec" style="margin-top: 0;">
+        "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif
+      </div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Font stack — mono</div>
+      <div class="type-spec" style="margin-top: 0;">
+        "Cascadia Code", ui-monospace, Consolas, monospace
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Titlebar component</h2>
+    <div class="component-frame">
+      <div class="demo-titlebar">
+        <div class="demo-titlebar-controls">
+          <button class="demo-btn" aria-label="Minimize">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="1" y="4.5" fill="currentColor"/></svg>
+          </button>
+          <button class="demo-btn" aria-label="Maximize">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>
+          </button>
+          <button class="demo-btn demo-btn-close" aria-label="Close">
+            <svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" stroke="currentColor"/><line x1="10" y1="0" x2="0" y2="10" stroke="currentColor"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="demo-content">
+        <h3>Blazy</h3>
+      </div>
+    </div>
+    <p class="component-caption">
+      Hover the buttons above — try <kbd>min</kbd>, <kbd>max</kbd>, and <kbd>close</kbd>.
+      Titlebar background is flush with the app background (no label, no
+      border) — the whole bar is a drag handle
+      (<code>-webkit-app-region: drag</code>) except the button group, which
+      opts back out (<code>no-drag</code>).
+    </p>
+  </section>
+
+  <section>
+    <h2>Sidebar component</h2>
+    <div class="component-frame">
+      <div class="demo-app">
+        <div class="demo-sidebar">
+          <span class="demo-sidebar-title">Blazy</span>
+        </div>
+        <div class="demo-app-main"></div>
+      </div>
+    </div>
+    <p class="component-caption">
+      Same flat background as the app and titlebar — no border, no separate
+      surface tone. The app name lives here now, centered at the top,
+      instead of in the content area.
+    </p>
+  </section>
+
+  <section>
+    <h2>Layout metrics</h2>
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-value">34px</div>
+        <div class="metric-label">Titlebar height</div>
+      </div>
+      <div class="metric">
+        <div class="metric-value">46px</div>
+        <div class="metric-label">Titlebar button width</div>
+      </div>
+      <div class="metric">
+        <div class="metric-value">0.1s</div>
+        <div class="metric-label">Hover transition</div>
+      </div>
+      <div class="metric">
+        <div class="metric-value">240px</div>
+        <div class="metric-label">Sidebar width</div>
+      </div>
+    </div>
+  </section>
+</div>

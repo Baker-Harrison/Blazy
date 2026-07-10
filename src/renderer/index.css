@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — the single source of truth for the palette in design.html.
+ * Each --color-* entry becomes a Tailwind utility (bg-app, text-ink-dim, …).
+ */
+@theme {
+  --color-app: #16171b;
+  --color-surface: #1b1d22;
+  --color-hover: #2a2d35;
+  --color-danger: #f2434f;
+  --color-ink: #e8eaf0;
+  --color-ink-dim: #9aa1ad;
+  --color-edge: #2c2f37;
+
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", ui-monospace, Consolas, monospace;
+}
+
+/* Indeterminate loading sweep for the browser pane's chrome row. */
+@keyframes browser-loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+    background-color: var(--color-app);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+}
+
+/* Scrollable but with no visible scrollbar (tab strip). */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* xterm fills the pane; override default #000 viewport so it matches app chrome */
+.terminal-pane .xterm {
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.terminal-pane .xterm-viewport {
+  background-color: var(--color-app) !important;
+  /* No visible scrollbar; the mouse wheel still scrolls scrollback. */
+  scrollbar-width: none;
+}
+
+.terminal-pane .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-pane .xterm-screen {
+  background-color: transparent;
+}
+
+.terminal-pane .composition-view {
+  background: var(--color-app);
+  color: var(--color-ink);
+}
+
+/* Pane split handle — thin edge line with a wider invisible hit target */
+.pane-separator {
+  position: relative;
+  flex: 0 0 auto;
+  background-color: var(--color-edge);
+  outline: none;
+}
+
+.pane-separator[aria-orientation="vertical"],
+.pane-separator[data-separator][aria-orientation="vertical"] {
+  width: 1px;
+}
+
+.pane-separator[aria-orientation="horizontal"],
+.pane-separator[data-separator][aria-orientation="horizontal"] {
+  height: 1px;
+}
+
+/* Expand hit area without adding a visible gap between panes */
+.pane-separator::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+}
+
+.pane-separator[aria-orientation="vertical"]::before,
+.pane-separator[data-separator][aria-orientation="vertical"]::before {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+}
+
+.pane-separator[aria-orientation="horizontal"]::before,
+.pane-separator[data-separator][aria-orientation="horizontal"]::before {
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 7px;
+}
+
+.pane-separator:hover,
+.pane-separator[data-separator="hover"],
+.pane-separator[data-separator="active"],
+.pane-separator[data-separator="focus"] {
+  background-color: var(--color-ink-dim);
+}
