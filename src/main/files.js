@@ -43,17 +43,30 @@ async function writeFile(filePath, content) {
   fs.writeFileSync(filePath, content, 'utf-8');
 }
 
-// Wires up the three functions above so the on-screen UI can call them.
+// Reads a file as raw bytes and hands it back as "base64" — a way of
+// encoding arbitrary binary data (like an image or a spreadsheet file) as
+// plain text, since that's the only kind of data that can travel cleanly
+// over the messaging bridge between the background process and the
+// on-screen UI. This is used for file types where reading as plain text
+// (like readFile above does) would corrupt the data — images, .xlsx
+// spreadsheets, PDFs, etc.
+async function readFileBinary(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  return buffer.toString('base64');
+}
+
+// Wires up the functions above so the on-screen UI can call them.
 // "ipcMain.handle" registers a named channel (like a phone extension
 // number) — when the UI "calls" that channel name (e.g. 'fs:readFile'),
 // Electron runs the matching function here in the background process and
 // sends the result back. This is the security boundary that keeps random
-// web content from directly touching your files — only these three exact
+// web content from directly touching your files — only these exact
 // operations are allowed through.
 function registerFileHandlers() {
   ipcMain.handle('fs:readDir', (_e, dirPath) => readDir(dirPath));
   ipcMain.handle('fs:readFile', (_e, filePath) => readFile(filePath));
   ipcMain.handle('fs:writeFile', (_e, filePath, content) => writeFile(filePath, content));
+  ipcMain.handle('fs:readFileBinary', (_e, filePath) => readFileBinary(filePath));
 }
 
 module.exports = { registerFileHandlers };

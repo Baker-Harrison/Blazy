@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 // This hook manages the top-level list of workspaces — the folders you've
 // opened in the app, shown in the sidebar. It's the "manager" for creating,
 // renaming, and deleting whole workspaces (as opposed to the tabs/panes
 // inside a single workspace, which is handled elsewhere by useWorkspace.js).
 export function useWorkspaces() {
+  // The function that pops up our custom "Are you sure?" dialog and lets us
+  // "await" the user's answer (see contexts/ConfirmContext.jsx).
+  const confirm = useConfirm();
   // Every workspace the app knows about.
   const [workspaces, setWorkspaces] = useState([]);
   // Whether we've finished loading the initial list from the database yet.
@@ -61,12 +65,17 @@ export function useWorkspaces() {
   );
 
   // Deletes a workspace, after first asking the user to confirm (since this
-  // can't be undone) using the browser's built-in confirmation popup.
+  // can't be undone) using our custom on-brand confirmation popup.
   const deleteWorkspace = useCallback(
     async (id) => {
       const workspace = workspaces.find((w) => w.id === id);
       if (!workspace) return;
-      if (!window.confirm(`Delete workspace "${workspace.name}"?`)) return;
+      const ok = await confirm({
+        title: `Delete workspace "${workspace.name}"?`,
+        description: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+      });
+      if (!ok) return;
       await window.agentDB.deleteWorkspace(id);
       // If the workspace we just deleted was the one currently selected,
       // clear the selection so we don't end up "viewing" a workspace that
@@ -74,7 +83,7 @@ export function useWorkspaces() {
       if (selectedId === id) setSelectedId(null);
       await refresh();
     },
-    [refresh, workspaces, selectedId]
+    [confirm, refresh, workspaces, selectedId]
   );
 
   // Hand back everything a component needs to display and manage the

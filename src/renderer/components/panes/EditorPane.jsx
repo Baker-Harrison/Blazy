@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { ChevronIcon, FileIcon, FolderIcon, PanelLeftIcon } from '../icons';
+import ImageViewer from './viewers/ImageViewer';
+import SpreadsheetViewer from './viewers/SpreadsheetViewer';
+import PdfViewer from './viewers/PdfViewer';
 
 // The code Editor pane: a mini file browser (the "Explorer" panel) on the
 // left, showing the folders/files inside the current workspace, and the
@@ -126,9 +129,21 @@ export default function EditorPane({ tab, workspace }) {
     }
   }, [rootPath, loadDir]);
 
-  // Whenever the selected file changes, load its text content from disk.
+  // What KIND of viewer the currently selected file needs — plain text/code
+  // (Monaco), a picture, a spreadsheet, or a PDF. See kindForPath below.
+  // Only "text" files get loaded into Monaco and autosaved; the other
+  // kinds are read-only viewers that do their own file reading (since
+  // their file contents are binary, not text — see the viewer components
+  // in ./viewers).
+  const fileKind = selectedFile ? kindForPath(selectedFile) : null;
+
+  // Whenever the selected file changes, load its text content from disk —
+  // but only for files we're going to show in the text editor. Images,
+  // spreadsheets, and PDFs are binary data; reading them as UTF-8 text (as
+  // this does) would corrupt them, so those kinds skip this entirely and
+  // let their own viewer component read the file instead.
   useEffect(() => {
-    if (!selectedFile) {
+    if (!selectedFile || fileKind !== 'text') {
       setContent('');
       return;
     }
@@ -298,59 +313,65 @@ export default function EditorPane({ tab, workspace }) {
         </>
       )}
 
-      {/* Right side: either the code editor for the selected file, or a
-          placeholder message if nothing is selected yet. */}
+      {/* Right side: whichever viewer fits the selected file (code editor,
+          image, spreadsheet, PDF), or a placeholder message if nothing is
+          selected yet. */}
       <div className="flex min-w-0 flex-1 flex-col">
         {selectedFile ? (
           <>
             <div className="flex h-8 shrink-0 items-center justify-between border-b border-edge px-3">
               <span className="truncate text-[12px] text-ink">{selectedFile}</span>
             </div>
-            <div className="min-h-0 flex-1">
-              <Editor
-                theme="vs-dark"
-                path={selectedFile}
-                // Guesses which programming language this file is written
-                // in (based on its file extension) so Monaco can apply the
-                // right syntax highlighting (coloring keywords, strings,
-                // etc. differently) — see languageForPath below.
-                defaultLanguage={languageForPath(selectedFile)}
-                value={content}
-                onChange={(value) => {
-                  const nextContent = value || '';
-                  setContent(nextContent);
-                  // Autosave: every time the text changes, reset the
-                  // debounce timer. If the user keeps typing, the timer
-                  // keeps getting pushed back; once they pause for half a
-                  // second, we write the current content to disk.
-                  if (autosaveTimer.current) {
-                    clearTimeout(autosaveTimer.current);
-                  }
-                  const fileBeingEdited = selectedFile;
-                  pendingWrite.current = { filePath: fileBeingEdited, content: nextContent };
-                  autosaveTimer.current = setTimeout(() => {
-                    autosaveTimer.current = null;
-                    pendingWrite.current = null;
-                    window.fs.writeFile(fileBeingEdited, nextContent);
-                  }, 250);
-                }}
-                options={{
-                  minimap: { enabled: false }, // Disables the small zoomed-out code preview on the right edge.
-                  fontSize: 13,
-                  automaticLayout: true, // Keeps the editor correctly sized as its container resizes.
-                  scrollBeyondLastLine: false,
-                  // Wraps long lines to fit the visible width instead of
-                  // running off the right edge and forcing you to scroll
-                  // sideways to read them — this is what actually fixes
-                  // "some text is off the right side of this editor" on a
-                  // narrow pane, since a fixed font size alone can't make
-                  // arbitrarily long lines fit without either shrinking
-                  // text to an unreadable size or wrapping it.
-                  wordWrap: 'on',
-                  wrappingIndent: 'same',
-                }}
-              />
-            </div>
+            {fileKind === 'image' && <ImageViewer filePath={selectedFile} />}
+            {fileKind === 'spreadsheet' && <SpreadsheetViewer filePath={selectedFile} />}
+            {fileKind === 'pdf' && <PdfViewer filePath={selectedFile} />}
+            {fileKind === 'text' && (
+              <div className="min-h-0 flex-1">
+                <Editor
+                  theme="vs-dark"
+                  path={selectedFile}
+                  // Guesses which programming language this file is written
+                  // in (based on its file extension) so Monaco can apply the
+                  // right syntax highlighting (coloring keywords, strings,
+                  // etc. differently) — see languageForPath below.
+                  defaultLanguage={languageForPath(selectedFile)}
+                  value={content}
+                  onChange={(value) => {
+                    const nextContent = value || '';
+                    setContent(nextContent);
+                    // Autosave: every time the text changes, reset the
+                    // debounce timer. If the user keeps typing, the timer
+                    // keeps getting pushed back; once they pause for half a
+                    // second, we write the current content to disk.
+                    if (autosaveTimer.current) {
+                      clearTimeout(autosaveTimer.current);
+                    }
+                    const fileBeingEdited = selectedFile;
+                    pendingWrite.current = { filePath: fileBeingEdited, content: nextContent };
+                    autosaveTimer.current = setTimeout(() => {
+                      autosaveTimer.current = null;
+                      pendingWrite.current = null;
+                      window.fs.writeFile(fileBeingEdited, nextContent);
+                    }, 250);
+                  }}
+                  options={{
+                    minimap: { enabled: false }, // Disables the small zoomed-out code preview on the right edge.
+                    fontSize: 13,
+                    automaticLayout: true, // Keeps the editor correctly sized as its container resizes.
+                    scrollBeyondLastLine: false,
+                    // Wraps long lines to fit the visible width instead of
+                    // running off the right edge and forcing you to scroll
+                    // sideways to read them — this is what actually fixes
+                    // "some text is off the right side of this editor" on a
+                    // narrow pane, since a fixed font size alone can't make
+                    // arbitrarily long lines fit without either shrinking
+                    // text to an unreadable size or wrapping it.
+                    wordWrap: 'on',
+                    wrappingIndent: 'same',
+                  }}
+                />
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-[13px] text-ink-dim">
@@ -419,6 +440,23 @@ function TreeNode({ entry, level, expanded, selectedFile, onToggle, onSelect }) 
       <span className="truncate">{entry.name}</span>
     </button>
   );
+}
+
+// Looks at a file's extension to decide which VIEWER should show it: the
+// text/code editor (Monaco), an image viewer, a spreadsheet grid, or a PDF
+// reader. This is the one place that decides "what does this file look
+// like" — everything else (the Explorer tree, the tab system) stays
+// unaware of file types and just hands a path to whichever viewer this
+// picks.
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico']);
+const SPREADSHEET_EXTENSIONS = new Set(['csv', 'xlsx', 'xls']);
+
+function kindForPath(filePath) {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
+  if (SPREADSHEET_EXTENSIONS.has(ext)) return 'spreadsheet';
+  if (ext === 'pdf') return 'pdf';
+  return 'text';
 }
 
 // Looks at a file's extension (the letters after the last ".") to guess

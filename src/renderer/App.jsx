@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import TitleBar from './components/TitleBar';
 import UpdateNotification from './components/UpdateNotification';
 import WorkspaceView from './components/workspace/WorkspaceView';
+import { ConfirmProvider } from './contexts/ConfirmContext';
 import { useUpdater } from './hooks/useUpdater';
 import { useWorkspaces } from './hooks/useWorkspaces';
 
@@ -10,7 +11,19 @@ import { useWorkspaces } from './hooks/useWorkspaces';
 // blueprint for the entire window. Everything you see (the sidebar on the
 // left, the titlebar with the min/max/close buttons, and the main content
 // area) is assembled here and nested inside this one component.
+//
+// It's wrapped in <ConfirmProvider> so that any component or hook anywhere
+// in the app can pop up the custom "Are you sure?" dialog (see
+// contexts/ConfirmContext.jsx) instead of the browser's plain built-in one.
 export default function App() {
+  return (
+    <ConfirmProvider>
+      <AppShell />
+    </ConfirmProvider>
+  );
+}
+
+function AppShell() {
   // "Hooks" are reusable bundles of logic + data. Here we pull in:
   // - workspaces: all the data and actions related to your list of
   //   workspaces (create, rename, delete, switch between them, etc.)

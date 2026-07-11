@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld('terminals', {
   write: (id, data) => ipcRenderer.invoke('terminal:write', id, data),
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
   kill: (id) => ipcRenderer.invoke('terminal:kill', id),
+  // Confirms that `count` characters of output have been fully drawn on
+  // screen — part of the flow-control handshake that stops a very fast
+  // shell from overwhelming the display (see terminal.js). Uses "send"
+  // (one-way, no reply) instead of "invoke" because it fires constantly
+  // and nothing needs to wait for an answer.
+  ack: (id, count) => ipcRenderer.send('terminal:ack', id, count),
   // Terminal output streams in continuously (as text is printed), so
   // instead of a one-time request/response, we subscribe to an ongoing
   // stream of "data" events. Each call to onData returns an "unsubscribe"
@@ -120,6 +126,10 @@ contextBridge.exposeInMainWorld('fs', {
   readDir: (dirPath) => ipcRenderer.invoke('fs:readDir', dirPath),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', filePath, content),
+  // Reads a file as raw bytes (base64-encoded text) instead of as plain
+  // text. Used for file types where reading as text would corrupt the
+  // data — images, .xlsx spreadsheets, PDFs, etc. See files.js.
+  readFileBinary: (filePath) => ipcRenderer.invoke('fs:readFileBinary', filePath),
 });
 
 // Auto-update controls (check for a new version, download it, install it),

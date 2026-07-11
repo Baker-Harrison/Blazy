@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { DeleteIcon, FolderIcon, PlusIcon } from '../icons';
 import { relativeTime } from '../../lib/time';
 import TreeRow from './TreeRow';
@@ -79,6 +80,7 @@ export default function WorkspaceTree({ workspaces, query = '' }) {
 // One workspace row in the tree, plus its collapsible list of threads
 // nested underneath it.
 function WorkspaceNode({ workspace, workspaces, forceExpanded = false }) {
+  const confirm = useConfirm();
   const key = `w:${workspace.id}`;
   const collapsed = !forceExpanded && workspaces.collapsedKeys.has(key);
   const { selection } = workspaces;
@@ -97,8 +99,16 @@ function WorkspaceNode({ workspace, workspaces, forceExpanded = false }) {
   // threads (since deleting it deletes those too).
   const handleDelete = async () => {
     const threadCount = workspace.threads.length;
-    const detail = threadCount > 0 ? ` This deletes ${threadCount} thread(s).` : '';
-    if (!window.confirm(`Delete workspace "${workspace.name}"?${detail}`)) return;
+    const description =
+      threadCount > 0
+        ? `This deletes ${threadCount} thread(s). This cannot be undone.`
+        : 'This cannot be undone.';
+    const ok = await confirm({
+      title: `Delete workspace "${workspace.name}"?`,
+      description,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     await workspaces.deleteWorkspace(workspace.id);
   };
 
@@ -146,10 +156,16 @@ function WorkspaceNode({ workspace, workspaces, forceExpanded = false }) {
 
 // One conversation-thread row, nested under its parent workspace.
 function ThreadNode({ thread, workspace, workspaces, collapsed, index = 0 }) {
+  const confirm = useConfirm();
   const active = workspaces.selection.threadId === thread.id;
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete thread "${thread.title}"?`)) return;
+    const ok = await confirm({
+      title: `Delete thread "${thread.title}"?`,
+      description: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     await workspaces.deleteThread(thread.id);
   };
 

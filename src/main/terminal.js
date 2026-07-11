@@ -60,8 +60,39 @@ function trimBufferSafely(text, cap) {
 }
 
 // Maps each terminal's unique id to its live process and buffered output.
-const terminals = new Map(); // id -> { pty, buffer }
+const terminals = new Map(); // id -> { pty, buffer, unacked, paused }
 let nextId = 1;
+
+// ── Flow control (recommended by the xterm.js documentation) ──
+//
+// A shell can produce output far faster than the on-screen terminal can
+// draw it (think of accidentally printing a huge file). The on-screen
+// widget buffers what it can't draw yet, but that buffer has a hard limit
+// — once overflowed, output is silently DROPPED, which shows up as
+// missing/garbled text, and in the meantime the whole app lags.
+//
+// The fix is like a walkie-talkie protocol: we count how many characters
+// we've sent to the screen that the screen hasn't yet confirmed drawing
+// (each confirmation is an "ack" — short for acknowledgement). If too much
+// is unconfirmed (HIGH_WATERMARK), we tell the shell process to pause its
+// output; once the screen catches up (LOW_WATERMARK), we let it flow
+// again. The shell doesn't lose anything while paused — its output just
+// waits in the operating system's own pipe until we resume.
+const HIGH_WATERMARK = 100_000;
+const LOW_WATERMARK = 10_000;
+
+// Called when the on-screen terminal confirms it has finished drawing
+// `count` characters. If the shell was paused and the screen has now
+// caught up enough, let its output flow again.
+function ackTerminalData(id, count) {
+  const entry = terminals.get(id);
+  if (!entry) return;
+  entry.unacked = Math.max(entry.unacked - count, 0);
+  if (entry.paused && entry.unacked < LOW_WATERMARK) {
+    entry.paused = false;
+    entry.pty.resume();
+  }
+}
 
 // Tells the renderer which OS it's running on, and (on Windows) which
 // build of Windows — the on-screen terminal widget (xterm.js) needs this
@@ -119,14 +150,21 @@ function createTerminal(cwd) {
     useConpty: true,
   });
 
-  const entry = { pty: ptyProcess, buffer: '' };
+  const entry = { pty: ptyProcess, buffer: '', unacked: 0, paused: false };
 
   // Every time the shell process prints something, append it to our saved
   // buffer (trimming from the front if it grows past BUFFER_CAP) and
   // immediately forward it to the screen so it appears live, character by
   // character, just like typing directly into a real terminal window.
+  // We also count each chunk as "not yet confirmed drawn" and pause the
+  // shell if too much output is in flight — see flow control notes above.
   ptyProcess.onData((data) => {
     entry.buffer = trimBufferSafely(entry.buffer + data, BUFFER_CAP);
+    entry.unacked += data.length;
+    if (!entry.paused && entry.unacked > HIGH_WATERMARK) {
+      entry.paused = true;
+      ptyProcess.pause();
+    }
     broadcast('terminal:data', id, data);
   });
   // When the shell process ends (e.g. you type "exit"), let the UI know so
@@ -150,7 +188,19 @@ function createTerminal(cwd) {
 // closed and reopened) from what we saved to the database last time.
 async function attachTerminal(id) {
   const entry = terminals.get(id);
-  if (entry) return { alive: true, buffer: entry.buffer };
+  if (entry) {
+    // A re-attach means the on-screen side is starting over (e.g. the
+    // window was reloaded), so any "not yet confirmed drawn" count from
+    // the old screen is meaningless now — reset it and make sure the
+    // shell isn't left permanently paused waiting for confirmations that
+    // will never come.
+    entry.unacked = 0;
+    if (entry.paused) {
+      entry.paused = false;
+      entry.pty.resume();
+    }
+    return { alive: true, buffer: entry.buffer };
+  }
   const saved = await db.getTerminalBuffer(id);
   return { alive: false, buffer: saved || '' };
 }
@@ -197,6 +247,10 @@ function registerTerminalHandlers() {
   ipcMain.handle('terminal:write', (_e, id, data) => writeTerminal(id, data));
   ipcMain.handle('terminal:resize', (_e, id, cols, rows) => resizeTerminal(id, cols, rows));
   ipcMain.handle('terminal:kill', (_e, id) => killTerminal(id));
+  // Confirmations from the screen that output has been drawn — these use a
+  // fire-and-forget message (ipcMain.on, not handle) since they're sent
+  // very frequently and need no reply. See flow control notes above.
+  ipcMain.on('terminal:ack', (_e, id, count) => ackTerminalData(id, count));
 
   app.on('before-quit', () => {
     persistBuffers();
