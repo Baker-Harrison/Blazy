@@ -297,28 +297,27 @@ export default function BrowserPane({ tab, workspace }) {
   useEffect(() => {
     let raf;
     lastRect.current = null;
-    // Every intermediate frame of a CSS transition anywhere in this pane's
-    // ancestry — the vertical tab rail expanding/collapsing on hover, the
-    // app's own sidebar sliding open, a split divider being dragged — used
-    // to get forwarded to the background process as a real resize of the
-    // native page the instant it was measured. A single ~150ms transition
-    // fires ~10 of those in a row, and each one immediately repaints the
-    // real native browser view at that in-between size — which is exactly
-    // what a captured diagnostic log showed happening: a freshly-opened
-    // browser pane's content area rapidly resizing back and forth as the
-    // tab rail flickered open and shut while the mouse merely passed near
-    // it, leaving the actual page visibly mis-sized (scrollbar, cut-off
-    // content) until everything stopped moving.
+    // IMPORTANT — this pane used to wait for the rect to stop changing for
+    // 80ms before reporting it (the same "settle" debounce TerminalPane.jsx
+    // uses for its own resizing). That made sense for the terminal: a
+    // ConPTY resize is disruptive (it can reflow wrapped text), so it's
+    // worth waiting until the user is actually done dragging before doing
+    // it once. But the browser pane isn't reflowing anything of its own —
+    // it's just telling the background process "the real webpage should
+    // sit exactly here." Debouncing THAT means the real page freezes at
+    // its pre-drag size for the entire 80ms+ that the window/divider is
+    // still moving, which is exactly the stuck-content-area glitch this
+    // pane was built to avoid. So: do NOT reintroduce a settle timer here.
+    // Report every real change immediately, every animation frame — the
+    // native page view should track the placeholder live, the same way a
+    // picture glued to a piece of cardboard moves the instant you move the
+    // cardboard, not 80ms later.
     //
-    // The fix mirrors the same debounce already used for terminal resizing
-    // in TerminalPane.jsx: instead of reporting every measured change
-    // immediately, we wait for the rect to stop changing for a short
-    // stretch (SETTLE_MS) before reporting it — so a transition produces
-    // exactly one clean resize once it's actually done, not a dozen
-    // mid-flight ones.
-    const SETTLE_MS = 80;
-    let settleTimer = null;
-    let pendingRect = null;
+    // We still skip sending when nothing has actually changed (see
+    // rectsMatch below) so a steady, unmoving pane doesn't spam the
+    // background process with identical messages every frame — but any
+    // real change, including a single mid-transition frame, goes out right
+    // away.
     const rectsMatch = (a, b) =>
       a.visible === b.visible &&
       Math.abs(a.x - b.x) <= 0.5 &&
@@ -336,26 +335,16 @@ export default function BrowserPane({ tab, workspace }) {
           r.height > 0 &&
           el.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true });
         const rect = { x: r.x, y: r.y, width: r.width, height: r.height, visible };
-        // Compare against whatever we're currently waiting to settle (if a
-        // change is already pending) or the last thing we actually sent —
-        // so a further change while still waiting resets the debounce
-        // instead of racing against a stale comparison point.
-        const reference = pendingRect || lastRect.current;
-        if (!reference || !rectsMatch(reference, rect)) {
-          pendingRect = rect;
-          if (settleTimer) clearTimeout(settleTimer);
-          settleTimer = setTimeout(() => {
-            settleTimer = null;
-            const settledRect = pendingRect;
-            pendingRect = null;
-            if (!settledRect) return;
-            lastRect.current = settledRect;
-            window.browser.setViewport(
-              paneId,
-              { x: settledRect.x, y: settledRect.y, width: settledRect.width, height: settledRect.height },
-              settledRect.visible
-            );
-          }, SETTLE_MS);
+        // Only compare against — and update — the last rect we actually
+        // SENT. There's no separate "pending" rect anymore since there's
+        // no debounce timer to hold one for.
+        if (!lastRect.current || !rectsMatch(lastRect.current, rect)) {
+          lastRect.current = rect;
+          window.browser.setViewport(
+            paneId,
+            { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            rect.visible
+          );
         }
       }
       raf = requestAnimationFrame(tick);
@@ -363,7 +352,6 @@ export default function BrowserPane({ tab, workspace }) {
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
-      if (settleTimer) clearTimeout(settleTimer);
     };
   }, [paneId]);
 

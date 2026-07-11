@@ -43,7 +43,24 @@ function pushState(paneId) {
 function getPane(paneId) {
   let pane = panes.get(paneId);
   if (!pane) {
-    pane = { tabs: new Map(), order: [], activeTabId: null, bounds: null, visible: false };
+    // "attachedTabId" remembers which tab's native view is currently
+    // plugged into the window (via addChildView) — kept separate from
+    // "activeTabId" so we can tell "which tab SHOULD be on top" apart from
+    // "which tab's view is ACTUALLY wired into the window right now," and
+    // only touch the window's view hierarchy when those two disagree.
+    // "appliedBounds" remembers the last {x,y,width,height} rectangle we
+    // actually handed to setBounds, so a flood of identical viewport
+    // reports (the renderer can send many per second while resizing) don't
+    // all turn into real work — see syncBounds below.
+    pane = {
+      tabs: new Map(),
+      order: [],
+      activeTabId: null,
+      bounds: null,
+      visible: false,
+      attachedTabId: null,
+      appliedBounds: null,
+    };
     panes.set(paneId, pane);
   }
   return pane;
@@ -250,21 +267,89 @@ function materialize(paneId, tab) {
   tab.view.webContents.loadURL(tab.url).catch(() => {});
 }
 
+// Detaches whichever tab's native view is currently plugged into the
+// window for this pane (if any) — used when the active tab changes, or
+// when the pane itself is being torn down. Detaching is the "expensive,
+// only-when-it-really-changed" operation (it can cause a visible flicker
+// and reshuffles the window's on-screen stacking order), so every other
+// code path in this file is careful to only call this when the attached
+// tab is actually about to change, not on every single bounds update.
+function detachActiveView(pane) {
+  if (!pane.attachedTabId) return;
+  const prevTab = pane.tabs.get(pane.attachedTabId);
+  if (prevTab?.view && win && !win.isDestroyed()) {
+    prevTab.view.setVisible(false);
+    win.contentView.removeChildView(prevTab.view);
+  }
+  pane.attachedTabId = null;
+  pane.appliedBounds = null;
+}
+
+// Moves (or first-time-plugs-in) this pane's active native page view to
+// match wherever the renderer's placeholder rectangle currently is.
+//
+// This is deliberately split apart from "should the page even be showing
+// right now?" (that decision lives in applyVisibility below). The reason:
+// a window resize or split-divider drag can call this dozens of times a
+// second, and each call should be as cheap as possible — just "move the
+// rectangle" — with none of the heavier attach/detach work repeated unless
+// something actually changed. Think of it like a picture frame: once the
+// picture (the native view) is hung on the wall (addChildView), you don't
+// take it down and re-hang it every time you nudge it a few pixels over —
+// you just slide it. Re-hanging it every time is what caused the flicker
+// and z-order glitches this function exists to avoid.
+function syncBounds(paneId) {
+  const pane = panes.get(paneId);
+  if (!pane || !win || win.isDestroyed()) return;
+  const activeTab = pane.activeTabId ? pane.tabs.get(pane.activeTabId) : null;
+  if (!activeTab?.view || !pane.bounds) return;
+
+  // Step 1: make sure the RIGHT tab's view is plugged into the window.
+  // If some other tab's view is currently attached (e.g. the user just
+  // switched tabs), detach that one first — but only in that case, never
+  // as a routine part of a plain bounds update.
+  if (pane.attachedTabId !== activeTab.id) {
+    detachActiveView(pane);
+    win.contentView.addChildView(activeTab.view);
+    pane.attachedTabId = activeTab.id;
+  }
+
+  // Step 2: move it, but only if the rectangle actually changed since the
+  // last time we applied one. Bounds are integers (rounded once, in
+  // browser:setViewport below) so this comparison is exact — no risk of
+  // "close enough" floating-point numbers making us think nothing changed
+  // when it did, or vice versa.
+  const b = pane.bounds;
+  const prev = pane.appliedBounds;
+  const changed = !prev || prev.x !== b.x || prev.y !== b.y || prev.width !== b.width || prev.height !== b.height;
+  if (changed) {
+    activeTab.view.setBounds(b);
+    pane.appliedBounds = b;
+  }
+}
+
+// Decides whether this pane's active page should be visible at all right
+// now (as opposed to WHERE it should sit, which is syncBounds's job) —
+// e.g. it should hide while an in-app menu/overlay is open (so the native
+// page can't render on top of it), while the pane itself is off-screen
+// (a different workspace tab is active), or while it has no bounds yet.
+// Hiding just flips a "don't paint this" flag (setVisible(false)) rather
+// than unplugging the view from the window (removeChildView) — unplugging
+// is the expensive, flicker-prone operation, so we save it for when a tab
+// is actually closed or the pane is destroyed (see destroyTabView/
+// destroyPane), not for routine show/hide toggling.
 function applyVisibility(paneId) {
   const pane = panes.get(paneId);
   if (!pane || !win || win.isDestroyed()) return;
-  for (const id of pane.order) {
-    const tab = pane.tabs.get(id);
-    if (!tab?.view) continue;
-    const show = !overlayOpen && pane.visible && id === pane.activeTabId && pane.bounds;
-    if (show) {
-      win.contentView.addChildView(tab.view);
-      tab.view.setBounds(pane.bounds);
-      tab.view.setVisible(true);
-    } else {
-      tab.view.setVisible(false);
-      win.contentView.removeChildView(tab.view);
-    }
+  const activeTab = pane.activeTabId ? pane.tabs.get(pane.activeTabId) : null;
+  const shouldShow = !overlayOpen && pane.visible && !!activeTab?.view && !!pane.bounds;
+
+  if (shouldShow) {
+    syncBounds(paneId);
+    activeTab.view.setVisible(true);
+  } else if (pane.attachedTabId) {
+    const attachedTab = pane.tabs.get(pane.attachedTabId);
+    attachedTab?.view?.setVisible(false);
   }
 }
 
@@ -293,13 +378,25 @@ function createTab(paneId, url, { activate = true, lazy = false } = {}) {
   return id;
 }
 
-function destroyTabView(tab) {
+// Tears down a tab's native view completely — this is one of the few
+// places actually removing it from the window (via removeChildView) is
+// correct, since the view is being thrown away entirely, not just hidden.
+// Takes the owning pane (rather than looking it up) so it can clear
+// attachedTabId/appliedBounds when the tab being destroyed happens to be
+// the one currently plugged into the window — otherwise syncBounds would
+// wrongly believe that (now-destroyed) view was still attached and skip
+// re-attaching the next one.
+function destroyTabView(pane, tab) {
   if (!tab.view) return;
   try {
     if (win && !win.isDestroyed()) win.contentView.removeChildView(tab.view);
     tab.view.webContents.close();
   } catch {}
   tab.view = null;
+  if (pane.attachedTabId === tab.id) {
+    pane.attachedTabId = null;
+    pane.appliedBounds = null;
+  }
 }
 
 function closeTab(paneId, tabId) {
@@ -307,7 +404,7 @@ function closeTab(paneId, tabId) {
   if (!pane) return;
   const tab = pane.tabs.get(tabId);
   if (!tab) return;
-  destroyTabView(tab);
+  destroyTabView(pane, tab);
   pane.tabs.delete(tabId);
   const index = pane.order.indexOf(tabId);
   pane.order = pane.order.filter((id) => id !== tabId);
@@ -323,7 +420,7 @@ function closeTab(paneId, tabId) {
 function destroyPane(paneId) {
   const pane = panes.get(paneId);
   if (!pane) return;
-  for (const tab of pane.tabs.values()) destroyTabView(tab);
+  for (const tab of pane.tabs.values()) destroyTabView(pane, tab);
   panes.delete(paneId);
 }
 
@@ -351,6 +448,16 @@ function registerBrowserHandlers(getWindow) {
     pushState(paneId);
   });
 
+  // The renderer measures its "page area" placeholder with sub-pixel
+  // precision (e.g. 412.37px) — real screens don't have fractional
+  // pixels, so this is the ONE place we round that down to a whole
+  // number. Doing it here (and nowhere else) means syncBounds's "did the
+  // rectangle actually change?" check above can compare plain integers
+  // with a simple !== instead of guessing at some "close enough" fudge
+  // factor — and it means a rectangle that moved by less than half a
+  // pixel rounds back to the exact same integers, so it's correctly
+  // treated as "no change" instead of causing a pointless 1px-jitter
+  // setBounds call.
   ipcMain.on('browser:setViewport', (_e, paneId, bounds, visible) => {
     const pane = getPane(paneId);
     pane.bounds = bounds
@@ -375,7 +482,7 @@ function registerBrowserHandlers(getWindow) {
     materialize(paneId, tab);
     if (tab.crashed) {
       // Recreate a crashed tab's renderer on activation.
-      destroyTabView(tab);
+      destroyTabView(pane, tab);
       tab.crashed = false;
       materialize(paneId, tab);
     }
